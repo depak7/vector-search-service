@@ -23,7 +23,7 @@ RUN pip install --no-cache-dir torch==2.4.1 --index-url https://download.pytorch
 
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY . .
+COPY ./app /app/app
 
 ENV HOST=0.0.0.0 \
     PORT=8000
