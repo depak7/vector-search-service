@@ -1,0 +1,1 @@
+from .embedding_service import get_image_embedding, get_text_embedding
