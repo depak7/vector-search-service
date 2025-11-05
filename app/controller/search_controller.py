@@ -1,88 +1,114 @@
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 from pydantic import BaseModel
+from typing import List, Optional
 from app.service.embedding_service import (
     fetch_image,
     get_image_embedding,
     get_text_embedding,
 )
-from app.service.pinecone_service import upsert_embedding,query_similar_products
+from app.service.pinecone_service import upsert_embedding, query_similar_products
 from io import BytesIO
 from PIL import Image
 
 
 router = APIRouter()
 
+router = APIRouter()
 
-# ✅ Define product input schema
+
+# ✅ Define product schema
 class ProductRequest(BaseModel):
     imageUrl: str
     name: str
     description: str
     category: str
-    brand: str | None = None
-    price: float | None = None
-    productId: str | None = None
+    brand: Optional[str] = None
+    price: Optional[float] = None
+    productId: Optional[str] = None
 
 
-@router.post("/embed-product")
-def embed_product_controller(req: ProductRequest):
+@router.post("/embed-products")
+def embed_multiple_products(req: List[ProductRequest]):
     """
-    Controller to generate and store image + text embeddings for a product.
+    Generate and store image + text embeddings for multiple products.
+    Returns a detailed summary for success and failures.
     """
-    try:
-        # 1️⃣ Fetch and embed image
-        pil_image = fetch_image(req.imageUrl)
-        image_emb = get_image_embedding(pil_image)
+    success, failed = [], []
 
-        # 2️⃣ Generate text embedding (combine name, desc, category)
-        text_input = f"{req.name}. {req.description}. Category: {req.category}. Brand: {req.brand}. Price {req.price}."
-        text_emb = get_text_embedding(text_input)
+    for product in req:
+        try:
+            # Step 1️⃣ Fetch and embed image
+            pil_image = fetch_image(product.imageUrl)
+            image_emb = get_image_embedding(pil_image)
 
-        # 3️⃣ Prepare metadata
-        metadata = {
-            "product_id": req.productId or req.name.lower().replace(" ", "_"),
-            "name": req.name,
-            "description": req.description,
-            "category": req.category,
-            "brand": req.brand,
-            "price": req.price,
-        }
+            # Step 2️⃣ Generate text embedding
+            text_input = (
+                f"{product.name}. {product.description}. "
+                f"Category: {product.category}. Brand: {product.brand or ''}. Price: {product.price or ''}."
+            )
+            text_emb = get_text_embedding(text_input)
 
-        # 4️⃣ Store image embedding
-        upsert_embedding(
-            product_id=f"{metadata['product_id']}_img",
-            embedding=image_emb,
-            metadata={**metadata},
-            index_type="image"
+            # Step 3️⃣ Prepare metadata
+            product_id = product.productId or product.name.lower().replace(" ", "_")
+            metadata = {
+                "product_id": product_id,
+                "name": product.name,
+                "description": product.description,
+                "category": product.category,
+                "brand": product.brand,
+                "price": product.price,
+            }
 
-        )
+            # Step 4️⃣ Store image embedding
+            upsert_embedding(
+                product_id=f"{product_id}_img",
+                embedding=image_emb,
+                metadata={**metadata, "type": "image"},
+                index_type="image",
+            )
 
-        # 5️⃣ Store text embedding
-        upsert_embedding(
-            product_id=f"{metadata['product_id']}_txt",
-            embedding=text_emb,
-            metadata={**metadata},
-            index_type="text"
-        )
+            # Step 5️⃣ Store text embedding
+            upsert_embedding(
+                product_id=f"{product_id}_txt",
+                embedding=text_emb,
+                metadata={**metadata, "type": "text"},
+                index_type="text",
+            )
 
-        return {
-            "status": True,
-            "message": "Product embeddings created and stored successfully.",
-            "data": {
-                "product_id": metadata["product_id"],
-                "stored_types": ["image", "text"],
-                "metadata": metadata,
-            },
-        }
-    except Exception as e:
-        print("Error in embed_product_controller {}",e)
-        return { "status":False}
-        
+            success.append(
+                {
+                    "product_id": product_id,
+                    "status": "success",
+                    "stored_types": ["image", "text"],
+                }
+            )
+
+        except Exception as e:
+            failed.append(
+                {
+                    "product_name": product.name,
+                    "error": str(e),
+                }
+            )
+
+    # Step 6️⃣ Build final response
+    return {
+        "status": True if success else False,
+        "summary": {
+            "processed": len(req),
+            "success_count": len(success),
+            "failed_count": len(failed),
+        },
+        "success": success,
+        "failed": failed,
+    }
+
+
 @router.post("/image-search")
 async def similar_product_image_search(
     image_url: str = Form(None),
     file: UploadFile | None = File(None),
-    top_k: int = Form(10)
+    top_k: int = Form(10),
 ):
     """
     Perform visual search using an uploaded image or an image URL.
@@ -92,7 +118,9 @@ async def similar_product_image_search(
     try:
         # ✅ Step 1: Validate input
         if (not file or file.filename.strip() == "") and not image_url:
-            raise HTTPException(status_code=400, detail="Please provide either image_url or file.")
+            raise HTTPException(
+                status_code=400, detail="Please provide either image_url or file."
+            )
 
         # ✅ Step 2: Read image
         if file and file.filename.strip() != "":
@@ -101,43 +129,43 @@ async def similar_product_image_search(
                 pil_image = Image.open(BytesIO(image_bytes)).convert("RGB")
                 source = "file"
             except Exception as e:
-                raise HTTPException(status_code=400, detail=f"Invalid uploaded image: {e}")
+                raise HTTPException(
+                    status_code=400, detail=f"Invalid uploaded image: {e}"
+                )
         else:
             try:
                 pil_image = fetch_image(image_url)
                 source = "url"
             except Exception as e:
-                raise HTTPException(status_code=400, detail=f"Failed to fetch image from URL: {e}")
+                raise HTTPException(
+                    status_code=400, detail=f"Failed to fetch image from URL: {e}"
+                )
 
         # ✅ Step 3: Generate embedding
         embedding = get_image_embedding(pil_image)
 
         # ✅ Step 4: Query Pinecone for similar products
         results = query_similar_products(
-            query_embedding=embedding,
-            top_k=top_k,
-            filter=None,
-            index_type="image"
+            query_embedding=embedding, top_k=top_k, filter=None, index_type="image"
         )
 
         return {
             "status": True,
             "query_type": source,
             "count": len(results),
-            "results": results
+            "results": results,
         }
 
     except HTTPException as e:
         raise e  # Re-raise handled HTTP errors cleanly
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"❌ Failed to perform image search: {str(e)}")
-    
+        raise HTTPException(
+            status_code=500, detail=f"❌ Failed to perform image search: {str(e)}"
+        )
+
 
 @router.post("/text-search")
-async def similar_product_text_search(
-    query: str = Form(...),
-    top_k: int = Form(10)
-):
+async def similar_product_text_search(query: str = Form(...), top_k: int = Form(10)):
     """
     Perform semantic product search using a text query (e.g. 'red running shoes').
     - Uses text embeddings from Gemini.
@@ -152,25 +180,22 @@ async def similar_product_text_search(
         embedding = get_text_embedding(query)
 
         results = query_similar_products(
-            query_embedding=embedding,
-            top_k=top_k,
-            filters=None,
-            index_type="text"
+            query_embedding=embedding, top_k=top_k, filters=None, index_type="text"
         )
 
         return {
             "status": True,
             "query": query,
             "count": len(results),
-            "results": results
+            "results": results,
         }
 
     except HTTPException as e:
         raise e
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to perform text search: {str(e)}")
-
-
+        raise HTTPException(
+            status_code=500, detail=f"Failed to perform text search: {str(e)}"
+        )
 
 
 @router.post("/recommendations")
@@ -179,8 +204,8 @@ async def get_recommendations(
     product_name: str = Form(None),
     description: str = Form(None),
     image_url: str = Form(None),
-    mode: str = Form("hybrid"), 
-    top_k: int = Form(10)
+    mode: str = Form("hybrid"),
+    top_k: int = Form(10),
 ):
     try:
         if not product_id:
@@ -200,7 +225,7 @@ async def get_recommendations(
                     query_embedding=image_emb,
                     top_k=top_k,
                     filters={"type": {"$eq": "image"}, **filters},
-                    index_type="image"
+                    index_type="image",
                 )
                 combined_results.extend(image_results)
             except Exception as e:
@@ -215,7 +240,7 @@ async def get_recommendations(
                     query_embedding=text_emb,
                     top_k=top_k,
                     filters={"type": {"$eq": "text"}, **filters},
-                    index_type="text"
+                    index_type="text",
                 )
                 combined_results.extend(text_results)
             except Exception as e:
@@ -231,13 +256,15 @@ async def get_recommendations(
             "status": True,
             "mode": mode,
             "count": len(final_results),
-            "recommendations": final_results
+            "recommendations": final_results,
         }
 
     except HTTPException as e:
         raise e
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"❌ Failed to generate recommendations: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"❌ Failed to generate recommendations: {str(e)}"
+        )
 
 
 def _deduplicate_and_rank(results):
@@ -253,9 +280,3 @@ def _deduplicate_and_rank(results):
             merged[pid] = item
 
     return sorted(merged.values(), key=lambda x: x["score"], reverse=True)
-
-
-
-
-
-
