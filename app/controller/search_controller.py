@@ -54,9 +54,7 @@ def embed_multiple_products(req: List[ProductRequest]):
                 "product_id": product_id,
                 "name": product.name,
                 "description": product.description,
-                "category": product.category,
-                "brand": product.brand,
-                "price": product.price,
+                "category": product.category
             }
 
             # Step 4️⃣ Store image embedding
