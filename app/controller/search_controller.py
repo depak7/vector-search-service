@@ -144,7 +144,7 @@ async def similar_product_image_search(
 
         # ✅ Step 4: Query Pinecone for similar products
         results = query_similar_products(
-            query_embedding=embedding, top_k=top_k, filter=None, index_type="image"
+            query_embedding=embedding, top_k=top_k, filters=None, index_type="image"
         )
 
         return {
