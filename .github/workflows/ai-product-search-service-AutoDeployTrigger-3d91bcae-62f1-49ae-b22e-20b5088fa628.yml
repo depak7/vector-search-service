@@ -1,26 +1,23 @@
 name: Trigger auto deployment for ai-product-search-service
 
-# When this action will be executed
 on:
-  # Automatically trigger it when detected changes in repo
   push:
     branches: 
-      [ master ]
+      - master
     paths:
-    - '**'
-    - '.github/workflows/ai-product-search-service-AutoDeployTrigger-3d91bcae-62f1-49ae-b22e-20b5088fa628.yml'
-
-  # Allow manual trigger 
-  workflow_dispatch:      
+      - '**'
+      - '.github/workflows/ai-product-search-service-AutoDeployTrigger-3d91bcae-62f1-49ae-b22e-20b5088fa628.yml'
+  workflow_dispatch:
 
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
-    permissions: 
-      id-token: write #This is required for requesting the OIDC JWT Token
-      contents: read #Required when GH token is used to authenticate with private repo
+    permissions:
+      id-token: write
+      contents: read
 
     steps:
+      # Checkout repository
       - name: Checkout to the branch
         uses: actions/checkout@v2
 
@@ -31,6 +28,20 @@ jobs:
           tenant-id: ${{ secrets.AIPRODUCTSEARCHSERVICE_AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AIPRODUCTSEARCHSERVICE_AZURE_SUBSCRIPTION_ID }}
 
+      # Docker Hub login
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.AIPRODUCTSEARCHSERVICE_REGISTRY_USERNAME }}
+          password: ${{ secrets.AIPRODUCTSEARCHSERVICE_REGISTRY_PASSWORD }}
+
+      - name: Build and push base image
+        run: |
+          echo "🚀 Building and pushing base image..."
+          docker build -t depak7/base-ai-search-service:latest -f Dockerfile.base .
+          docker push depak7/base-ai-search-service:latest
+
+    
       - name: Build and push container image to registry
         uses: azure/container-apps-deploy-action@v2
         with:
@@ -45,5 +56,3 @@ jobs:
           imageToBuild: depak7/ai-product-search-service:${{ github.sha }}
           _buildArgumentsKey_: |
             _buildArgumentsValues_
-
-
