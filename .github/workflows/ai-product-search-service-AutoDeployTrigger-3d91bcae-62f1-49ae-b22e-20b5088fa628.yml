@@ -38,7 +38,7 @@ jobs:
       - name: Build and push base image
         run: |
           echo "🚀 Building and pushing base image..."
-          docker build -t depak7/base-ai-search-service:latest -f Dockerfile.base .
+          docker build -t depak7/base-ai-search-service:latest -f base.Dockerfile .
           docker push depak7/base-ai-search-service:latest
 
     
@@ -56,3 +56,4 @@ jobs:
           imageToBuild: depak7/ai-product-search-service:${{ github.sha }}
           _buildArgumentsKey_: |
             _buildArgumentsValues_
+
