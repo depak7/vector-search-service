@@ -35,9 +35,19 @@ jobs:
           username: ${{ secrets.AIPRODUCTSEARCHSERVICE_REGISTRY_USERNAME }}
           password: ${{ secrets.AIPRODUCTSEARCHSERVICE_REGISTRY_PASSWORD }}
 
-      - name: Build and push base image
+      - name: Detect dependency changes (requirements.txt or Dockerfile.base)
+        id: deps
         run: |
-          echo "🚀 Building and pushing base image..."
+          if git diff --name-only HEAD~1 | grep -E 'requirements.txt|Dockerfile.base'; then
+            echo "changed=true" >> $GITHUB_OUTPUT
+          else
+            echo "changed=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build and push base image
+        if: steps.deps.outputs.changed == 'true'
+        run: |
+          echo "🚀 Rebuilding base image due to dependency changes..."
           docker build -t depak7/base-ai-search-service:latest -f base.Dockerfile .
           docker push depak7/base-ai-search-service:latest
 
